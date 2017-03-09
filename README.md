@@ -20,3 +20,14 @@ Run in background:
  
 Results:
 	Stored in the mysql database table
+	
+----------------------------------------------------------------------
+Php -MySQL Component:
+This component should be uploaded in the web server (e.g. /var/www/html)
+The database populated by the Python component is accessed by this component to generate exvel reports
+
+Contents:
+mysqlConnect.php : mysql user credentials 
+index.html  : basic html file with links to getDailyReport.php, getMonthlyReport.php and getOverallReport.php
+
+
