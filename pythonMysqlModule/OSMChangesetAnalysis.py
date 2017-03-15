@@ -7,15 +7,16 @@ import datetime
 import schedule
 import time
 
+
+from geopy.geocoders import Nominatim
+
+
+
 from mysqlConnection import userName, userPassword, hostServer
-from osmUserList import userList
+from osmUserList import userList , targetCountryToMatch
 
 
 # CONFIG
-
-
-#userList = ['heromiya' ,'bidurdevkota']
-
 
 changesetIdCollectionFile = "cfile.xml"
 changesetDataFile = "dataFile.xml"
@@ -41,6 +42,13 @@ class OSMChangesetAnalysis:
 		return  connection
 		
 	#######################################################################
+	# logs error messages and system data update process start/end time
+	def logMessage( self, message ):
+		target = open("log.txt", 'a')   
+		target.write(str(datetime.datetime.now()) + "\n" + message + "\n" ) 
+		target.close()
+		
+	#######################################################################
 	
 	def insertData(self,query):									
 
@@ -54,7 +62,10 @@ class OSMChangesetAnalysis:
 			connection.commit()
 			
 		except:
-			print "Problem in Query: " + query
+			message = "Problem in Query: " + query
+			self.logMessage( message )
+			print message
+			
 							
 		finally:
 			connection.close()	
@@ -79,11 +90,33 @@ class OSMChangesetAnalysis:
 					
 				return (idList)
 		except:
-			print "Problem in Query: " + query
-				#row = cursor.fetchone() # to get a single row of data
+			message = "Problem in Query: " + query
+			self.logMessage( message )
+			print message
 				
 		finally:
 			connection.close()
+	
+	#######################################################################
+			
+			
+	def getCountryName(self, latitude, longitude):
+		
+		try:
+			geolocator = Nominatim()
+			location = geolocator.reverse( str(latitude) + "," +str(longitude) , language='en')			
+			address = location.address.split(",")			
+			country = address[-1].strip().encode('utf-8')  # strip() is used to remove space in front and tail of the text
+						
+			return country
+			
+		except:
+			
+			message = " Error: cannot get country from latitude longitude pair " + str(latitude) + "," +str(longitude) 
+			self.logMessage( message )
+			print message
+			exit(1)	
+		
 		
 		
 	#######################################################################
@@ -97,28 +130,67 @@ class OSMChangesetAnalysis:
 		try:
 			urllib.urlretrieve (dataDownloadURL, changesetDataFile)
 		except:
-			print " Error: cannot download the Changeset Data File  from " + dataDownloadURL 
+			message = " Error: cannot download the Changeset Data File  from " + dataDownloadURL 
+			self.logMessage( message )
+			print message
 			exit(1)	
+		
 		# parse the xml file
-		buildingCount = 0
+		totalBuildingCreated = 0
+		totalBuildingModified = 0
+		totalBuildingDeleted = 0
+		totalNodeCreated = 0
+		totalNodeModified = 0
+		totalNodeDeleted = 0
+		
 		tree = ET.parse(changesetDataFile)
 		root = tree.getroot() # get the root element
 		#way1 = root.findall('way')
 		#print len(way1)
 		
-		'''
-		for elem in root.findall('way/tag'):
-			if( elem.get('k') == 'building'):
-				buildingCount += 1
-		'''
+		
 		# follows the specific xml schema for creating building as in
 		# http://api.openstreetmap.org/api/0.6/changeset/#CHNAGESET_ID/download
+		
+		for elem in root.findall('create/node'):			
+			if ( targetCountryToMatch ): # if targetCountryToMatch is given then check
+				lat = elem.get('lat')
+				lon = elem.get('lon')
+				if (self.getCountryName(lat, lon) == targetCountryToMatch):
+					totalNodeCreated += 1	
+			else:
+				totalNodeCreated += 1	
+		
+		for elem in root.findall('modify/node'):
+			
+			if ( targetCountryToMatch ):
+				lat = elem.get('lat')
+				lon = elem.get('lon')
+				if (str(self.getCountryName(lat, lon)) == str(targetCountryToMatch)):
+					totalNodeModified += 1	
+					
+			else:
+				totalNodeModified += 1
+			
+		for elem in root.findall('delete/node'):
+			totalNodeDeleted += 1		
+		
 		for elem in root.findall('create/way/tag'):
 			if( elem.get('k') == 'building'):
-				buildingCount += 1
+				totalBuildingCreated += 1
+				
+		for elem in root.findall('modify/way/tag'):
+			if( elem.get('k') == 'building'):
+				totalBuildingModified += 1	
+				
+		for elem in root.findall('delete/way'):
+			totalBuildingDeleted += 1
 		
-		return buildingCount
-
+		
+		
+		
+		return [ totalBuildingCreated , totalBuildingModified, totalBuildingDeleted, totalNodeCreated, totalNodeModified, totalNodeDeleted]
+ 
 	#######################################################################
 	# function to download the  changeset IDs file ( and then the changeset file for each changesetID)
 	# of the user and count the changes made 
@@ -136,7 +208,9 @@ class OSMChangesetAnalysis:
 			try:
 				urllib.urlretrieve (downloadURL, changesetIdCollectionFile)
 			except:
-				print " Error: cannot download the Changeset File  from " + downloadURL 
+				message = " Error: cannot download the Changeset File  from " + downloadURL 
+				self.logMessage( message )
+				print message
 				exit(1)					
 			
 			tree = ET.parse(changesetIdCollectionFile)
@@ -155,13 +229,20 @@ class OSMChangesetAnalysis:
 				# if the changesetID is NEW, then download the file and update database				
 				if ( changesetID not in oldChnagesetIDList):
 					
-										
-					totalChangesByUser = self.getChangesetFileAndCount(changesetID)
+					#get list of building created, building modified, node created, node modified , node deleted					
+					totalChangeList = self.getChangesetFileAndCount(changesetID)
 					createdDate = datetime.datetime.strptime(createdAt, "%Y-%m-%dT%H:%M:%SZ" )
-
 				
-					query = "INSERT INTO `contributions` (`id`, `username`, `created_at`, `created_year`, `created_month`, `created_day`, `changeset_id`, `total_changes`) "
-					query +="VALUES (NULL, \'"+ str(user) +"\', \'"+ str(createdAt)+"\', \'"+ str(createdDate.strftime("%Y"))+"\', \'"+ str(createdDate.strftime("%m"))+"\', \'"+ str(createdDate.strftime("%d")) +"\', \'"+ str(changesetID) +"\', \'"+ str(totalChangesByUser) +"\')"
+					query = ( "INSERT INTO `contributions` (`id`, `username`, `created_at`, `created_year`, `created_month`," 
+							"`created_day`, `changeset_id`, `building_created`, `building_modified`, `building_deleted`, "
+							 " `node_created`, `node_modified` , `node_deleted`) " 
+					 "VALUES (NULL, \'"+ str(user) +"\', \'"+ str(createdAt)+"\', \'"+ str(createdDate.strftime("%Y"))+"\', \'" 
+					 + str(createdDate.strftime("%m"))+"\', \'"+ str(createdDate.strftime("%d")) +"\', \'"+ str(changesetID) 
+					 +"\', \'"+ str(totalChangeList[0]) +"\', \'"+ str(totalChangeList[1]) +"\', \'"  
+					 + str(totalChangeList[2]) +"\', \'"+ str(totalChangeList[3])+"\', \'" + str(totalChangeList[4])+"\', \'"
+					 + str(totalChangeList[5]) +"\')" )
+					
+					#print query
 					self.insertData(query)
 				
 			print '...'
@@ -169,29 +250,40 @@ class OSMChangesetAnalysis:
 
 #######################################################################		
 
-def job():
-	
-	print "START:OSM Data Import " + str(datetime.datetime.now())
+def job():		
 	
 	osm_obj1 = OSMChangesetAnalysis("OSM Changeset Analysis")
+	
+	message = "START:OSM Data Import " + str(datetime.datetime.now())
+	osm_obj1.logMessage( message )
 
 	for user in userList:
 		
 		osm_obj1.processChangeSetData(user)
 	
-	print "END: OSM Data Import " + str(datetime.datetime.now())
-	print "Wait until next import tomorrow" 
+	message = "END: OSM Data Import " + str(datetime.datetime.now())
+	message += "\nWait until next import after 6 Hours\n\n" 
+	
+	osm_obj1.logMessage( message )
 
 	
 if __name__ == '__main__':
 
-	print("Task Started...")
-	#schedule.every().day.at("23:31").do(job)
-	schedule.every().day.at("11:41").do(job) # run at 6:00 am
+	print("Task Started from " + str(datetime.datetime.now()))
+	
+	#schedule.every(1).minutes.do(job)
+
+	schedule.every().day.at("1:00").do(job) # run at 24:00 thai time
+	schedule.every().day.at("7:00").do(job)
+	schedule.every().day.at("13:00").do(job) 
+	schedule.every().day.at("19:00").do(job) 
 
 	while 1:
 		schedule.run_pending()
 		time.sleep(1)
+		#break
+	
+	print "END"
 			
 
 
