@@ -5,12 +5,11 @@ $conn = new mysqli($server, $user, $password);
 
 mysqli_select_db($conn, 'osm_contributions');  
 
-$setSql = "SELECT `username`, `created_year`, sum(`total_changes`) FROM `contributions`  where `created_year`='2017' group by `username`";
+$setSql = "SELECT `username`, `created_year`, sum(`building_created`) , sum(`building_modified`), sum(`building_deleted`) , sum(`node_created`), sum(`node_modified`), sum(`node_deleted`) FROM `contributions`  where `created_year`='2017' group by `username`";
 $setRec = mysqli_query($conn,$setSql);
 
 $columnHeader ='';
-$columnHeader = "SN"."\t"."User Name"."\t"."Year"."\t"."Total Changes"."\t";
-
+$columnHeader = "SN"."\t"."User Name"."\t"."Year"."\t"."building_created"."\t"."building_modified"."\t"."building_deleted"."\t"."node_created"."\t"."node_modified"."\t"."node_deleted"."\t";
 
 $setData='';
 $i=0;
